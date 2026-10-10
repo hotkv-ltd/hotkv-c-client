@@ -1,0 +1,222 @@
+name: Publish
+
+# Tag `v*` -> build and test every platform in static and shared flavours,
+# package the `cmake --install` tree, prove the package works from a fresh
+# extraction (find_package and pkg-config), and publish a GitHub release.
+#
+# Run it by hand (Actions -> Publish -> Run workflow) to rehearse everything
+# except publishing: with `dry_run` on (the default) no release is created.
+
+on:
+    push:
+        tags:
+            - "v*"
+    workflow_dispatch:
+        inputs:
+            dry_run:
+                description: "Build, test and package only; do not create a release"
+                type: boolean
+                default: true
+
+permissions:
+    contents: read
+
+jobs:
+    check-version:
+        name: Tag matches the library version
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@v6
+
+            # A tag like v1.2.3 must agree with project(VERSION) and the
+            # HOTKV_VERSION_STRING macro, otherwise the packages would carry
+            # the wrong SOVERSION / config version.
+            - name: Compare
+              shell: bash
+              run: |
+                  proj=$(sed -n 's/^ *VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt | head -1)
+                  macro=$(sed -n 's/^#define HOTKV_VERSION_STRING "\(.*\)"/\1/p' include/hotkv.h)
+                  echo "CMake project version: $proj"
+                  echo "HOTKV_VERSION_STRING:  $macro"
+                  test -n "$proj" && test "$proj" = "$macro"
+                  if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+                      tag="${GITHUB_REF_NAME#v}"
+                      tag="${tag%%-*}"
+                      echo "Tag version:           $tag"
+                      test "$tag" = "$proj"
+                  fi
+
+    build-release:
+        name: ${{ matrix.platform }} ${{ matrix.linkage }}
+        needs: check-version
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 30
+        strategy:
+            fail-fast: false
+            matrix:
+                platform: [linux-x86_64, linux-arm64, macos-arm64, windows-x86_64]
+                linkage: [static, shared]
+                include:
+                    - platform: linux-x86_64
+                      os: ubuntu-24.04
+                      cc: gcc-13
+                      tls: "ON"
+                    - platform: linux-arm64
+                      os: ubuntu-24.04-arm
+                      cc: gcc-13
+                      tls: "ON"
+                    - platform: macos-arm64
+                      os: macos-14
+                      cc: clang
+                      tls: "ON"
+                    # No system OpenSSL on the Windows runner: Windows packages
+                    # are built without TLS. Build from source for TLS on Windows.
+                    - platform: windows-x86_64
+                      os: windows-2022
+                      tls: "OFF"
+                    - linkage: static
+                      shared: "OFF"
+                    - linkage: shared
+                      shared: "ON"
+
+        env:
+            PKG_NAME: libhotkv-${{ matrix.platform }}-${{ matrix.linkage }}
+
+        steps:
+            - uses: actions/checkout@v6
+
+            - name: Install dependencies (Linux)
+              if: runner.os == 'Linux'
+              run: sudo apt-get update && sudo apt-get install -y ninja-build libssl-dev pkg-config
+
+            - name: Install dependencies (macOS)
+              if: runner.os == 'macOS'
+              run: brew install ninja pkg-config openssl@3
+
+            - name: Configure (Unix)
+              if: runner.os != 'Windows'
+              env:
+                  CC: ${{ matrix.cc }}
+              run: |
+                  extra=""
+                  if [ "$RUNNER_OS" = "macOS" ]; then
+                      extra="-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)"
+                  fi
+                  cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                    -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
+                    -DHOTKV_USE_SSL=${{ matrix.tls }} \
+                    -DHOTKV_BUILD_TESTS=ON -DHOTKV_BUILD_EXAMPLES=OFF $extra
+
+            - name: Configure (Windows)
+              if: runner.os == 'Windows'
+              run: >
+                  cmake -S . -B build -A x64
+                  -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+                  -DHOTKV_USE_SSL=${{ matrix.tls }}
+                  -DHOTKV_BUILD_TESTS=ON -DHOTKV_BUILD_EXAMPLES=OFF
+
+            - name: Build
+              run: cmake --build build --config Release
+
+            # No server in the runner: live tests report SKIP (exit 77). The
+            # unit tests (parser, formatter, pool, URL, CRC, numbers) run.
+            - name: Test
+              working-directory: build
+              run: ctest --output-on-failure -C Release
+
+            # The install tree is the package: library, header, CMake package
+            # and pkg-config file, ready to extract under any prefix.
+            - name: Package (Unix)
+              if: runner.os != 'Windows'
+              run: |
+                  cmake --install build --prefix "dist/$PKG_NAME"
+                  cd dist && tar czf "$PKG_NAME.tar.gz" "$PKG_NAME"
+
+            - name: Package (Windows)
+              if: runner.os == 'Windows'
+              run: |
+                  cmake --install build --config Release --prefix "dist/$env:PKG_NAME"
+                  Compress-Archive -Path "dist/$env:PKG_NAME" -DestinationPath "dist/$env:PKG_NAME.zip"
+
+            # Extract the archive somewhere else and build against it, the way
+            # a customer would: find_package(hotkv), then pkg-config.
+            - name: Verify the package (Unix)
+              if: runner.os != 'Windows'
+              run: |
+                  rm -rf "$RUNNER_TEMP/relocated" && mkdir -p "$RUNNER_TEMP/relocated"
+                  tar xzf "dist/$PKG_NAME.tar.gz" -C "$RUNNER_TEMP/relocated"
+                  root="$RUNNER_TEMP/relocated/$PKG_NAME"
+                  cmake -S examples/consumer -B build-consumer -G Ninja \
+                      -DCMAKE_PREFIX_PATH="$root" -DCMAKE_BUILD_TYPE=Release
+                  cmake --build build-consumer
+                  ./build-consumer/consumer
+                  pcdir="$(dirname "$(find "$root" -name libhotkv.pc)")"
+                  libdir="$(dirname "$(find "$root" \( -name 'libhotkv.a' -o -name 'libhotkv.so' -o -name 'libhotkv*.dylib' \) | head -1)")"
+                  PKG_CONFIG_PATH="$pcdir" pkg-config --cflags --libs libhotkv
+                  PKG_CONFIG_PATH="$pcdir" pkg-config --static --libs libhotkv
+                  cc examples/consumer/main.c $(PKG_CONFIG_PATH="$pcdir" pkg-config --cflags --libs libhotkv) \
+                      -Wl,-rpath,"$libdir" -o pc-consumer
+                  ./pc-consumer
+
+            - name: Verify the package (Windows)
+              if: runner.os == 'Windows'
+              run: |
+                  $relo = Join-Path $env:RUNNER_TEMP "relocated"
+                  if (Test-Path $relo) { Remove-Item -Recurse -Force $relo }
+                  Expand-Archive -Path "dist/$env:PKG_NAME.zip" -DestinationPath $relo
+                  $root = Join-Path $relo $env:PKG_NAME
+                  cmake -S examples/consumer -B build-consumer -A x64 -DCMAKE_PREFIX_PATH="$root"
+                  cmake --build build-consumer --config Release
+                  $env:PATH = "$root/bin;$env:PATH"
+                  & build-consumer/Release/consumer.exe
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v7
+              with:
+                  name: ${{ env.PKG_NAME }}
+                  path: dist/${{ env.PKG_NAME }}.*
+                  if-no-files-found: error
+
+    create-release:
+        name: Create Release
+        needs: build-release
+        # Never on a manual dry run, and never for a ref that is not a v* tag.
+        if: startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+        permissions:
+            contents: write
+        steps:
+            - name: Download all artifacts
+              uses: actions/download-artifact@v8
+              with:
+                  path: artifacts
+
+            - name: Checksums
+              run: |
+                  cd artifacts
+                  find . -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} . \;
+                  sha256sum *.tar.gz *.zip | tee SHA256SUMS.txt
+
+            - name: Create GitHub Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  generate_release_notes: true
+                  prerelease: ${{ contains(github.ref_name, '-') }}
+                  files: |
+                      artifacts/*.tar.gz
+                      artifacts/*.zip
+                      artifacts/SHA256SUMS.txt
+
+    dry-run-summary:
+        name: Dry run summary
+        needs: build-release
+        if: ${{ !(startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run) }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+        steps:
+            - run: |
+                  echo "Dry run: every platform built, tested, packaged and verified." >> "$GITHUB_STEP_SUMMARY"
+                  echo "No release was created. Package artifacts are attached to this run." >> "$GITHUB_STEP_SUMMARY"

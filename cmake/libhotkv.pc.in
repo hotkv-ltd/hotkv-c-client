@@ -1,0 +1,15 @@
+# Relative to this file, so the package works wherever it is extracted.
+prefix=${pcfiledir}/@HOTKV_PC_REL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: libhotkv
+Description: Official HotKV C client library
+URL: https://github.com/hotkv-ltd/hotkv-c-client
+Version: @PROJECT_VERSION@
+License: Apache-2.0
+Cflags: -I${includedir}@HOTKV_PC_CFLAGS@
+Libs: -L${libdir} -lhotkv
+Libs.private: @HOTKV_PC_LIBS_PRIVATE@
+@HOTKV_PC_REQUIRES@
