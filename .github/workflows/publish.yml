@@ -27,7 +27,7 @@ jobs:
         runs-on: ubuntu-24.04
         timeout-minutes: 30
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             # A tag like v1.2.3 must agree with project(VERSION) and the
             # HOTKV_VERSION_STRING macro, otherwise the packages would carry
@@ -84,7 +84,7 @@ jobs:
             PKG_NAME: libhotkv-${{ matrix.platform }}-${{ matrix.linkage }}
 
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Install dependencies (Linux)
               if: runner.os == 'Linux'
