@@ -51,7 +51,7 @@ jobs:
                       cxx: cl
 
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Install dependencies (Linux)
               if: runner.os == 'Linux'
@@ -106,7 +106,7 @@ jobs:
                 linkage: [static, shared]
                 tls: ["OFF", "ON"]
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Install dependencies
               run: sudo apt-get update && sudo apt-get install -y ninja-build libssl-dev
@@ -129,7 +129,7 @@ jobs:
         runs-on: ubuntu-24.04
         timeout-minutes: 30
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Install dependencies
               run: sudo apt-get update && sudo apt-get install -y ninja-build libssl-dev
