@@ -41,7 +41,7 @@ jobs:
                       cxx: clang++-18
 
                     - name: macOS ARM64 Apple Clang
-                      os: macos-14
+                      os: macos-15
                       cc: clang
                       cxx: clang++
 
