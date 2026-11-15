@@ -67,7 +67,7 @@ jobs:
                       cc: gcc-13
                       tls: "ON"
                     - platform: macos-arm64
-                      os: macos-14
+                      os: macos-15
                       cc: clang
                       tls: "ON"
                     # No system OpenSSL on the Windows runner: Windows packages

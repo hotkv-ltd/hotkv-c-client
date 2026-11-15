@@ -248,9 +248,16 @@ static int hkv_fake_start(hkv_fake_t *f, const char *raw_reply, size_t raw_reply
     struct sockaddr_in addr;
     socklen_t alen = sizeof(addr);
     memset(f, 0, sizeof(*f));
-    if (hotkv_net_init() != HOTKV_OK) {
-        return 0; /* Winsock must be started before the first socket() on Windows */
+#ifdef _WIN32
+    {
+        /* Winsock must be started before the first socket() on Windows.
+         * hotkv_net_init() is internal and not exported from the DLL. */
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+            return 0;
+        }
     }
+#endif
     f->raw_reply = raw_reply;
     f->raw_reply_len = raw_reply_len;
 
