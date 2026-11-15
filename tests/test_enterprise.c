@@ -45,6 +45,7 @@ static int pthread_join(pthread_t t, void **ret) {
     return 0;
 }
 #else
+#include <netinet/in.h>
 #include <pthread.h>
 #endif
 #include <stdio.h>
