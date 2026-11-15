@@ -23,6 +23,10 @@
     #include <sys/socket.h>
     #include <sys/types.h>
     #include <netinet/in.h>
+    /* _POSIX_C_SOURCE (set in hotkv.h) hides this on macOS. */
+    #ifndef INADDR_LOOPBACK
+        #define INADDR_LOOPBACK ((uint32_t)0x7f000001)
+    #endif
     #include <netinet/tcp.h>
     #include <arpa/inet.h>
     #include <netdb.h>

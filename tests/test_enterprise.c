@@ -45,10 +45,6 @@ static int pthread_join(pthread_t t, void **ret) {
     return 0;
 }
 #else
-/* hotkv.h sets _POSIX_C_SOURCE, under which macOS hides INADDR_LOOPBACK. */
-#ifndef INADDR_LOOPBACK
-#define INADDR_LOOPBACK ((uint32_t)0x7f000001)
-#endif
 #include <pthread.h>
 #endif
 #include <stdio.h>
